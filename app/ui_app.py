@@ -59,10 +59,16 @@ def run_pipeline(razorpay_file=None, bank_file=None, ledger_file=None, fourth_fi
     api_key_present = bool(os.environ.get("GEMINI_API_KEY"))
     
     if gemini_enabled and api_key_present:
-        print("[System] Running in GEMINI-ENABLED mode.")
-        llm_provider = GeminiLLMProvider()
-        arbitration_provider = GeminiArbitrationProvider()
-        qa_provider_func = gemini_qa_provider_func
+        try:
+            llm_provider = GeminiLLMProvider()
+            arbitration_provider = GeminiArbitrationProvider()
+            qa_provider_func = gemini_qa_provider_func
+            print("[System] Running in GEMINI-ENABLED mode.")
+        except Exception as _gemini_init_err:
+            print(f"[System] Gemini provider init failed ({_gemini_init_err}). Falling back to DETERMINISTIC mode.")
+            llm_provider = MockLLMProvider()
+            arbitration_provider = MockArbitrationProvider()
+            qa_provider_func = None
     else:
         print("[System] Running in DETERMINISTIC mode.")
         llm_provider = MockLLMProvider()

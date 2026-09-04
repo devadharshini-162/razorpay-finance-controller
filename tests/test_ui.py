@@ -58,6 +58,8 @@ class TestUIOrchestration:
         rzp_f = DummyFile("rzp.csv", _sample_rzp_csv())
         bank_f = DummyFile("bank.csv", _sample_bank_csv())
 
+        import os
+        os.environ["GEMINI_ENABLED"] = "false"  # force deterministic regardless of .env
         res = run_pipeline(rzp_f, bank_f)
         assert res is not None
         assert isinstance(res["result"], FinalReconciliationResult)
@@ -68,6 +70,7 @@ class TestUIOrchestration:
         report = res["report"]
         assert report.total_source_records == 1
         assert report.deterministic_matches == 1
+
 
     def test_run_pipeline_invalid_file(self):
         invalid_f = DummyFile("invalid.csv", "")
