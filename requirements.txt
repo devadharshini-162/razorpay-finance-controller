@@ -1,0 +1,14 @@
+# Razorpay AI Finance Controller — Python Dependencies
+# All versions pinned to exact installed state for reproducibility.
+# Install: pip install -r requirements.txt
+
+# ── Core backend ──────────────────────────────────────────────────────────────
+pydantic==2.13.5          # Canonical models, Pydantic validation
+fastapi==0.141.1           # REST API adapter (api_app.py)
+uvicorn==0.52.4            # ASGI server for FastAPI
+python-multipart==0.0.32   # Required by FastAPI for multipart file uploads (UploadFile)
+streamlit==1.63.0          # Fallback UI (ui_app.py); retained alongside React
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest==9.1.1              # Full test suite (tests/, 160 tests)
+httpx==0.28.1              # Required by FastAPI TestClient (starlette.testclient)

@@ -1,0 +1,63 @@
+Invoice No,Paid On,Customer,Amount Received,Remarks
+inv_356787,11/09/2026,Customer 356787,645.52,Payment for inv_356787
+inv_476417,2026-09-06,Customer 476417,600.83,Payment for inv_476417
+inv_705397,2026-09-11,Customer 705397,3130.75,Payment for inv_705397
+inv_802729,2026-09-06,Customer 802729,897.01,Payment for inv_802729
+inv_905635,2026-09-09,Customer 905635,1176.11,Payment for inv_905635
+inv_358607,Sep 11 2026,Customer 358607,2348.37,Payment for inv_358607
+inv_260265,2026-09-02,Customer 260265,3803.33,Payment for inv_260265
+inv_663054,11/09/2026,Customer 663054,3631.54,Payment for inv_663054
+inv_412942,09-09-2026,Customer 412942,4571.88,Payment for inv_412942
+inv_972064,2026-09-08,Customer 972064,195.44,Payment for inv_972064
+inv_676510,2026-09-03,Customer 676510,729.12,Payment for inv_676510
+inv_226882,2026-09-06,Customer 226882,2246.69,Payment for inv_226882
+inv_531071,2026-09-02,Customer 531071,3329.02,Payment for inv_531071
+inv_577110,Sep 07 2026,Customer 577110,1399.49,Payment for inv_577110
+,11-09-2026,Customer 888387,1569.99,Payment for inv_888387 - some notes
+,2026-09-02,Customer 265409,4408.42,Payment for inv_265409 - some notes
+,2026-09-09,Customer 413921,138.33,Payment for inv_413921 - some notes
+,2026-09-03,Customer 852470,1434.51,Payment for inv_852470 - some notes
+,2026-09-02,Customer 146228,3207.99,Payment for inv_146228 - some notes
+,07/09/2026,Customer 824586,2848.44,Payment for inv_824586 - some notes
+,2026-09-01,Customer 934794,1610.47,Payment for inv_934794 - some notes
+,2026-09-09,Customer 750810,4432.26,Payment for inv_750810 - some notes
+,2026-09-07,Customer 448321,221.45,Payment for inv_448321 - some notes
+,2026-09-01,Customer 956253,4307.11,Payment for inv_956253 - some notes
+inv_392683,2026-09-05,Customer 392683,4335.33,Payment for inv_392683
+inv_462479,05/09/2026,Customer 462479,287.46,Payment for inv_462479
+inv_446239,2026-09-06,Customer 446239,2213.36,Payment for inv_446239
+inv_497562,2026-09-09,Customer 497562,723.71,Payment for inv_497562
+inv_563638,2026-09-10,Customer 563638,3308.06,Payment for inv_563638
+inv_308802,2026-09-04,Customer 308802,3396.7,Payment for inv_308802
+inv_787926,2026-09-07,Customer 787926,2522.45,Payment for inv_787926
+inv_800005,2026-09-02,Customer 800005,2336.66,Payment for inv_800005
+inv_597732,09-09-2026,Customer 597732,2284.98,Payment for inv_597732
+inv_258157,2026-09-06,Customer 258157,4475.83,Payment for inv_258157
+inv_703655,2026-09-10,Customer 703655,195.71,Payment for inv_703655
+inv_386193,2026-09-09,Customer 386193,4499.28,Payment for inv_386193
+inv_720644,03-09-2026,Customer 720644,2717.21,Payment for inv_720644
+inv_542042,2026-09-06,Customer 542042,1463.46,Payment for inv_542042
+inv_259784,2026-09-01,Customer 259784,1076.87,Payment for inv_259784
+inv_915573,2026-09-10,Customer 915573,4822.3,Payment for inv_915573
+inv_720859,2026-09-07,Customer 720859,4713.21,Payment for inv_720859
+inv_488571,2026-09-10,Customer 488571,1801.3,Payment for inv_488571
+inv_383201,2026-09-07,Customer 383201,3695.6,Payment for inv_383201
+inv_886931,2026-09-04,Customer 886931,1466.75,Payment for inv_886931
+inv_725113,2026-09-06,Customer 725113,4009.38,Payment for inv_725113
+inv_612311,2026-09-04,Customer 612311,519.5,Payment for inv_612311
+inv_408528,2026-09-08,Customer 408528,2296.06,Payment for inv_408528
+inv_882169,08-09-2026,Customer 882169,2812.02,Payment for inv_882169
+inv_225362,Sep 04 2026,Customer 225362,691.21,Payment for inv_225362
+inv_650121,05-09-2026,Customer 650121,3650.47,Payment for inv_650121
+inv_232731,2026-09-03,Customer 232731,1581.11,Payment for inv_232731
+inv_232731,Sep 03 2026,Customer 232731,1581.11,Payment for inv_232731
+inv_177680,2026-09-02,Customer 177680,4128.37,Payment for inv_177680
+inv_177680,2026-09-02,Customer 177680,4128.37,Payment for inv_177680
+inv_549660,Sep 08 2026,Customer 549660,1557.03,Payment for inv_549660
+inv_549660,2026-09-08,Customer 549660,1557.03,Payment for inv_549660
+inv_999398,2026-09-06,Customer 999398,686.63,Refund for Customer 999398
+inv_221552,06-09-2026,Customer 221552,289.78,Refund for Customer 221552
+inv_755788,10/09/2026,Customer 755788,768.62,Refund for Customer 755788
+inv_114338,2026-09-03,Customer 114338,345.21,Refund for Customer 114338
+inv_386706,2026-09-05,Customer 386706,533.43,Refund for Customer 386706
+inv_389666,03-09-2026,Customer 389666,870.83,Refund for Customer 389666
