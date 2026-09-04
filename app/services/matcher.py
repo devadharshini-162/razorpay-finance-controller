@@ -125,15 +125,13 @@ def _candidate_summary(candidates: list[CanonicalTransaction]) -> str:
 
 
 def _ambiguity_reason(src: CanonicalTransaction, candidates: list[CanonicalTransaction], matched_on: list[str]) -> str:
-    ids = " and ".join(candidate.record_id for candidate in candidates)
     shared_amounts = ", ".join(sorted({str(candidate.amount) for candidate in candidates if candidate.amount is not None})) or "an unavailable amount"
     shared_dates = ", ".join(sorted({str(_get_date(candidate)) for candidate in candidates if _get_date(candidate)})) or "an unavailable date"
     missing_references = all(not candidate.reference for candidate in candidates)
-    reference_note = " Neither bank record includes a reference/UTR to distinguish it." if missing_references else " Their available references do not identify a unique match."
+    reference_note = "Neither candidate includes a UTR/reference to distinguish it." if missing_references else "Available references do not identify a unique candidate."
     return (
-        f"Could not choose between {ids}: each matches {src.record_id} on "
-        f"{' and '.join(field.replace('_', ' ') for field in matched_on)} "
-        f"(amount {shared_amounts}; date {shared_dates}).{reference_note}"
+        f"{len(candidates)} bank candidates share the same {', '.join(field.replace('_', ' ') for field in matched_on)} "
+        f"(amount ₹{shared_amounts}; date {shared_dates}). {reference_note}"
     )
 
 

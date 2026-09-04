@@ -1,8 +1,8 @@
 import os
 import json
 import traceback
-from typing import List, Dict, Any, Type, Optional
-from pydantic import BaseModel, Field
+from typing import List, Dict, Any, Type, Optional, Literal
+from pydantic import BaseModel, Field, model_validator
 
 from app.services.schema_mapper import LLMProvider
 from app.services.arbitration_provider import ArbitrationProvider
@@ -20,8 +20,35 @@ GEMINI_MODEL_DEFAULT = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_TIMEOUT_SECONDS = float(os.environ.get("GEMINI_TIMEOUT_SECONDS", "5"))
 
 
+class GeminiBatchArbitrationDecision(BaseModel):
+    """Wire contract for one item in Gemini's batch response.
+
+    Keeping evidence as one short string makes the JSON contract reliable for
+    hosted models. The application converts it into structured audit evidence.
+    """
+
+    source_record_id: str
+    decision: Literal["matched", "ambiguous"]
+    candidate_record_id: str | None = None
+    confidence: float = Field(ge=0.0, le=1.0)
+    reason: str = Field(min_length=1, max_length=240)
+    evidence: str = Field(default="")
+
+    model_config = {"extra": "forbid"}
+
+    @model_validator(mode="after")
+    def validate_choice(self):
+        if self.decision == "matched" and not self.candidate_record_id:
+            raise ValueError("A matched decision requires candidate_record_id.")
+        if self.decision == "ambiguous" and self.candidate_record_id:
+            raise ValueError("An ambiguous decision must not select a candidate.")
+        return self
+
+
 class GeminiBatchArbitrationResponse(BaseModel):
-    decisions: list[dict[str, Any]] = Field(default_factory=list)
+    decisions: list[GeminiBatchArbitrationDecision] = Field(default_factory=list)
+
+    model_config = {"extra": "forbid"}
 
 class GeminiProviderMixin:
     """Shared mixin for Gemini-based providers."""
@@ -192,15 +219,30 @@ Decision Rules:
                 "deterministic_evidence": evidence,
             })
         prompt = f"""
-You are a financial reconciliation arbitrator. Evaluate every case below.
-For each case return one object in `decisions` with source_record_id, decision,
-candidate_record_id, confidence, reason, and evidence.
+You are the final, audit-safe review stage of a financial reconciliation system.
+Your goal is NOT to maximize matches. Choose a bank record only when the supplied
+evidence makes it clearly more credible than every other candidate. Otherwise,
+preserve the ambiguity for human review.
 
-Rules:
-1. decision is exactly `matched` or `ambiguous`.
-2. A matched candidate_record_id must be one of that case's candidate_ids.
-3. If no single candidate is clearly better, return ambiguous with null candidate_record_id.
-4. Do not invent values, IDs, dates, or amounts.
+Review every case below independently. Return exactly one decision for every
+source_record_id, in the same order. Use only values present in that case.
+
+Required JSON fields for each decision:
+- source_record_id: copy exactly from the case
+- decision: exactly "matched" or "ambiguous"
+- candidate_record_id: a listed candidate ID for matched; null for ambiguous
+- confidence: number from 0 to 1
+- reason: one plain-English sentence, maximum 180 characters
+- evidence: one short plain-English sentence naming the deciding signal, maximum 160 characters
+
+Decision rules:
+1. Never invent references, identifiers, amounts, dates, or transaction facts.
+2. Do not match merely because amounts or dates are equal when multiple candidates remain.
+3. Prefer a unique UTR/reference, a unique exact net amount calculation, or a
+   clearly unique date/description signal. If none uniquely separates candidates,
+   return ambiguous.
+4. Do not add fields, Markdown, explanations outside JSON, arrays inside evidence,
+   or a candidate_record_id for an ambiguous decision.
 
 Cases: {json.dumps(cases, default=str)}
 """
@@ -209,7 +251,8 @@ Cases: {json.dumps(cases, default=str)}
             by_source = {}
             valid_candidates = {source.record_id: {candidate.record_id for candidate in candidates}
                                 for source, candidates, _ in requests}
-            for item in response.get("decisions", []):
+            for raw_item in response.get("decisions", []):
+                item = raw_item.model_dump() if isinstance(raw_item, GeminiBatchArbitrationDecision) else raw_item
                 if not isinstance(item, dict):
                     continue
                 source_id = item.get("source_record_id")
@@ -220,10 +263,27 @@ Cases: {json.dumps(cases, default=str)}
                 # return a concise evidence string; retain it under a stable
                 # dictionary key so the downstream validator can accept it.
                 decision = {key: value for key, value in item.items() if key != "source_record_id"}
-                if not isinstance(decision.get("evidence"), dict):
-                    decision["evidence"] = {
-                        "provider_summary": str(decision.get("evidence") or "Gemini batch arbitration")
-                    }
+                reason = " ".join(str(decision.get("reason") or "No unique bank candidate could be verified.").split())[:240]
+                raw_evidence = decision.get("evidence")
+                evidence_text = " ".join(str(raw_evidence or "Gemini batch arbitration").split())[:180]
+                raw_choice = str(decision.get("decision") or "").lower().strip()
+                candidate_id = decision.get("candidate_record_id")
+                if isinstance(candidate_id, str) and candidate_id.lower().strip() in {"", "null", "none", "n/a"}:
+                    candidate_id = None
+                if raw_choice not in {"matched", "ambiguous"}:
+                    raw_choice, candidate_id = "ambiguous", None
+                    reason = "Gemini returned an invalid decision; retained for manual review."
+                try:
+                    confidence = max(0.0, min(1.0, float(decision.get("confidence", 0.0))))
+                except (TypeError, ValueError):
+                    confidence = 0.0
+                decision = {
+                    "decision": raw_choice,
+                    "candidate_record_id": candidate_id,
+                    "confidence": confidence,
+                    "reason": reason,
+                    "evidence": {"provider_summary": evidence_text, "provider": "GeminiArbitrationProvider", "model": self.model_name},
+                }
                 if decision.get("decision") == "matched" and decision.get("candidate_record_id") not in valid_candidates[source_id]:
                     decision = {**decision, "decision": "ambiguous", "candidate_record_id": None}
                 by_source[source_id] = decision

@@ -15,6 +15,7 @@ class TestGeminiIntegrations:
         source = CanonicalTransaction(record_id="s1", source="source", transaction_type="unknown", amount=100.0)
         candidate = CanonicalTransaction(record_id="b1", source="bank", transaction_type="unknown", amount=100.0)
         provider = object.__new__(GeminiArbitrationProvider)
+        provider.model_name = "test-model"
         provider._generate_structured_json = lambda *_: {"decisions": [{
             "source_record_id": "s1", "decision": "ambiguous", "candidate_record_id": None,
             "confidence": 0.5, "reason": "Both candidates have the same amount and date.",
@@ -22,7 +23,21 @@ class TestGeminiIntegrations:
         }]}
         result = provider.resolve_ambiguities([(source, [candidate], {})])
         assert "source_record_id" not in result["s1"]
-        assert result["s1"]["evidence"] == {"provider_summary": "amount, date"}
+        assert result["s1"]["evidence"]["provider_summary"] == "amount, date"
+
+    def test_batch_response_invalid_values_degrade_to_safe_ambiguity(self):
+        source = CanonicalTransaction(record_id="s1", source="source", transaction_type="unknown", amount=100.0)
+        candidate = CanonicalTransaction(record_id="b1", source="bank", transaction_type="unknown", amount=100.0)
+        provider = object.__new__(GeminiArbitrationProvider)
+        provider.model_name = "test-model"
+        provider._generate_structured_json = lambda *_: {"decisions": [{
+            "source_record_id": "s1", "decision": "uncertain", "candidate_record_id": "made-up",
+            "confidence": "not-a-number", "reason": "", "evidence": ["bad", "shape"],
+        }]}
+        result = provider.resolve_ambiguities([(source, [candidate], {})])
+        assert result["s1"]["decision"] == "ambiguous"
+        assert result["s1"]["candidate_record_id"] is None
+        assert result["s1"]["confidence"] == 0.0
     
     @patch.dict(os.environ, {"GEMINI_API_KEY": "dummy_key"}, clear=True)
     @patch("app.services.gemini_providers.genai.GenerativeModel.generate_content")
