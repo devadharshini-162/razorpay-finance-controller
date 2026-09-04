@@ -15,33 +15,33 @@ try:
 except ImportError:
     genai = None
 
-GEMINI_MODEL_DEFAULT = os.environ.get("GEMINI_MODEL", "gemini-1.5-pro")
+GEMINI_MODEL_DEFAULT = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
 class GeminiProviderMixin:
     """Shared mixin for Gemini-based providers."""
-    
+
     def __init__(self, model_name: str = GEMINI_MODEL_DEFAULT):
         if not genai:
             raise ImportError("google-generativeai package is not installed.")
-        
+
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
             raise ValueError("GEMINI_API_KEY environment variable is not set.")
-            
+
         genai.configure(api_key=api_key)
         self.model_name = model_name
 
     def _generate_structured_json(self, prompt: str, schema_class: Type) -> dict:
         """Call Gemini demanding structured JSON output that conforms to a Pydantic schema."""
         model = genai.GenerativeModel(self.model_name)
-        
+
         try:
-            # We enforce application/json natively
+            # We enforce application/json natively.
+            # We do not pass response_schema because Protobuf Schema fails on dynamic dicts (additionalProperties).
             response = model.generate_content(
-                prompt,
+                f"{prompt}\nReturn JSON strictly matching this schema:\n{json.dumps(schema_class.model_json_schema())}",
                 generation_config=genai.GenerationConfig(
                     response_mime_type="application/json",
-                    response_schema=schema_class,
                     temperature=0.0  # Must be purely deterministic translation
                 ),
             )
@@ -53,7 +53,7 @@ class GeminiProviderMixin:
 
 class GeminiLLMProvider(LLMProvider, GeminiProviderMixin):
     """Google Gemini implementation for Schema Mapping."""
-    
+
     def __init__(self, model_name: str = GEMINI_MODEL_DEFAULT):
         GeminiProviderMixin.__init__(self, model_name)
 
@@ -71,7 +71,7 @@ Rules:
 """
         try:
             result_dict = self._generate_structured_json(prompt, MappingResult)
-            
+
             # Ensure the structured dict complies with the mapping result return type
             return MappingResult(
                 source_name=source_name,
@@ -96,7 +96,7 @@ Rules:
 
 class GeminiArbitrationProvider(ArbitrationProvider, GeminiProviderMixin):
     """Google Gemini implementation for Arbitrating Ambiguous Records."""
-    
+
     def __init__(self, model_name: str = GEMINI_MODEL_DEFAULT):
         GeminiProviderMixin.__init__(self, model_name)
 
@@ -111,7 +111,7 @@ class GeminiArbitrationProvider(ArbitrationProvider, GeminiProviderMixin):
         Never invent a candidate ID.
         """
         valid_candidate_ids = [c.record_id for c in candidates]
-        
+
         prompt = f"""
 You are an expert financial reconciler.
 Evaluate this Razorpay source record and choose ONE best matching bank candidate, or determine it is truly ambiguous.
@@ -125,9 +125,9 @@ Candidates:
 """
         for i, cand in enumerate(candidates):
             prompt += f"\n--- Candidate {i+1} ---\n{cand.model_dump_json(exclude_none=True)}"
-            
+
         prompt += f"""
-        
+
 Decision Rules:
 1. "decision" must be exactly "matched" or "ambiguous".
 2. "candidate_record_id" MUST strictly be one of: {valid_candidate_ids}. If no single clear match, use null.
@@ -137,16 +137,16 @@ Decision Rules:
 
         try:
             result_dict = self._generate_structured_json(prompt, LLMArbitrationDecision)
-            
+
             # Post-validation to enforce strict boundaries
             decision = result_dict.get("decision")
             candidate_id = result_dict.get("candidate_record_id")
-            
+
             if decision == "matched" and candidate_id not in valid_candidate_ids:
                 # Force graceful degradation if hallucinated candidate
                 decision = "ambiguous"
                 candidate_id = None
-                
+
             return {
                 "decision": decision,
                 "candidate_record_id": candidate_id,
@@ -175,14 +175,14 @@ def gemini_qa_provider_func(fact_set_dict: dict) -> str:
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         return ""
-        
+
     genai.configure(api_key=api_key)
-    
+
     prompt = f"""
 You are a Razorpay Finance AI Assistant answering a user's question about reconciliation.
 Use ONLY the provided facts. DO NOT invent OR ADD ANY numbers, transaction IDs, or names.
 If the facts are insufficient to fully answer, state what you know and that is it.
-    
+
 User Question: {fact_set_dict.get("question")}
 Facts: {fact_set_dict.get("facts")}
 Relevant Records: {fact_set_dict.get("record_ids")}
