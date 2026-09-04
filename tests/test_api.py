@@ -62,3 +62,66 @@ class TestFastAPIAdapter:
         res = client.post("/api/reconcile", files=files)
         assert res.status_code == 400
         assert "Bank statement CSV file is required" in res.json()["detail"]
+
+    def test_qa_response_quality_without_gemini(self):
+        """Test that Q&A produces human-friendly responses when Gemini is disabled."""
+        files = {
+            "razorpay_file": ("razorpay.csv", _sample_rzp_csv(), "text/csv"),
+            "bank_file": ("bank.csv", _sample_bank_csv(), "text/csv"),
+        }
+        res = client.post("/api/reconcile", files=files, data={"primary_source_name": "razorpay"})
+        assert res.status_code == 200
+        session_id = res.json()["session_id"]
+
+        # Test resolution summary question
+        qa_res = client.post(
+            "/api/qa/ask",
+            json={"session_id": session_id, "question": "How many transactions were matched?"},
+        )
+        assert qa_res.status_code == 200
+        answer = qa_res.json()["answer"]
+        # Should NOT contain JSON or "Verified Facts" - should be human-friendly
+        assert "Verified Facts" not in answer
+        assert "{" not in answer or "%" in answer  # If curly braces, should be part of output, not JSON
+        assert any(word in answer.lower() for word in ["matched", "out of", "resolution"])
+
+    def test_qa_fee_total_question(self):
+        """Test Q&A for fee total question without Gemini."""
+        files = {
+            "razorpay_file": ("razorpay.csv", _sample_rzp_csv(), "text/csv"),
+            "bank_file": ("bank.csv", _sample_bank_csv(), "text/csv"),
+        }
+        res = client.post("/api/reconcile", files=files, data={"primary_source_name": "razorpay"})
+        assert res.status_code == 200
+        session_id = res.json()["session_id"]
+
+        qa_res = client.post(
+            "/api/qa/ask",
+            json={"session_id": session_id, "question": "How much fee was deducted?"},
+        )
+        assert qa_res.status_code == 200
+        answer = qa_res.json()["answer"]
+        # Should contain currency symbol or word "fee" or "total"
+        assert any(word in answer.lower() for word in ["fee", "total", "₹", "deducted"])
+        assert "Verified Facts" not in answer
+
+    def test_qa_unresolved_records_question(self):
+        """Test Q&A for unresolved records without Gemini."""
+        files = {
+            "razorpay_file": ("razorpay.csv", _sample_rzp_csv(), "text/csv"),
+            "bank_file": ("bank.csv", _sample_bank_csv(), "text/csv"),
+        }
+        res = client.post("/api/reconcile", files=files, data={"primary_source_name": "razorpay"})
+        assert res.status_code == 200
+        session_id = res.json()["session_id"]
+
+        qa_res = client.post(
+            "/api/qa/ask",
+            json={"session_id": session_id, "question": "What are the unresolved transactions?"},
+        )
+        assert qa_res.status_code == 200
+        answer = qa_res.json()["answer"]
+        # Should be human-readable
+        assert "Verified Facts" not in answer
+        # Should contain answer about unresolved/ambiguous/unmatched
+        assert any(word in answer.lower() for word in ["unresolved", "ambiguous", "unmatched", "total"])

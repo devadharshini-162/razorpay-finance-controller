@@ -136,8 +136,13 @@ export const QAPage: React.FC<QAPageProps> = ({ sessionId }) => {
                   </button>
 
                   {expandedMessageId === msg.id && (
-                    <div className="mt-2 rounded-xl bg-slate-900 p-3 text-[11px] font-mono text-emerald-400 overflow-x-auto border border-slate-800">
-                      {JSON.stringify(msg.evidence, null, 2)}
+                    <div className="mt-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 text-[11px] text-slate-700 dark:text-slate-300 space-y-1.5">
+                      {msg.evidence.record_ids && (
+                        <p><span className="font-semibold">Records:</span> {msg.evidence.record_ids.length ? msg.evidence.record_ids.join(', ') : 'None'}</p>
+                      )}
+                      {msg.evidence.facts && Object.entries(msg.evidence.facts).map(([key, value]) => (
+                        <p key={key}><span className="font-semibold capitalize">{key.replace(/_/g, ' ')}:</span> {Array.isArray(value) ? (value.length ? value.join(', ') : 'None') : String(value)}</p>
+                      ))}
                     </div>
                   )}
                 </div>

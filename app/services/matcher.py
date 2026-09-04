@@ -101,6 +101,42 @@ def _expected_settlement(tx: CanonicalTransaction) -> Decimal | None:
     return result
 
 
+def _candidate_details(candidates: list[CanonicalTransaction]) -> list[dict[str, str | None]]:
+    """Expose the fields a reviewer needs to distinguish bank candidates."""
+    return [
+        {
+            "record_id": candidate.record_id,
+            "reference": candidate.reference,
+            "amount": str(candidate.amount) if candidate.amount is not None else None,
+            "date": str(_get_date(candidate)) if _get_date(candidate) else None,
+            "description": candidate.description,
+        }
+        for candidate in candidates
+    ]
+
+
+def _candidate_summary(candidates: list[CanonicalTransaction]) -> str:
+    return "; ".join(
+        f"{candidate.record_id} (reference {candidate.reference or 'not supplied'}, "
+        f"amount {candidate.amount if candidate.amount is not None else 'not supplied'}, "
+        f"date {_get_date(candidate) or 'not supplied'})"
+        for candidate in candidates
+    )
+
+
+def _ambiguity_reason(src: CanonicalTransaction, candidates: list[CanonicalTransaction], matched_on: list[str]) -> str:
+    ids = " and ".join(candidate.record_id for candidate in candidates)
+    shared_amounts = ", ".join(sorted({str(candidate.amount) for candidate in candidates if candidate.amount is not None})) or "an unavailable amount"
+    shared_dates = ", ".join(sorted({str(_get_date(candidate)) for candidate in candidates if _get_date(candidate)})) or "an unavailable date"
+    missing_references = all(not candidate.reference for candidate in candidates)
+    reference_note = " Neither bank record includes a reference/UTR to distinguish it." if missing_references else " Their available references do not identify a unique match."
+    return (
+        f"Could not choose between {ids}: each matches {src.record_id} on "
+        f"{' and '.join(field.replace('_', ' ') for field in matched_on)} "
+        f"(amount {shared_amounts}; date {shared_dates}).{reference_note}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Result container
 # ---------------------------------------------------------------------------
@@ -477,8 +513,10 @@ class DeterministicMatcher:
         evidence = {
             "candidate_count": len(candidates),
             "candidate_record_ids": [c.record_id for c in candidates],
+            "bank_candidates": _candidate_details(candidates),
             "matched_on": matched_on,
         }
+        reason = _ambiguity_reason(src, candidates, matched_on)
         dec = ReconciliationDecision(
             decision_id=_make_id(),
             source_record_id=src.record_id,
@@ -486,7 +524,7 @@ class DeterministicMatcher:
             decision="ambiguous",
             method="ambiguous",
             confidence=CONFIDENCE["ambiguous"],
-            reason=f"Multiple candidates ({len(candidates)}) satisfy the same deterministic rule on {matched_on}.",
+            reason=reason,
             evidence=evidence,
         )
         aud = AuditRecord(
@@ -503,7 +541,7 @@ class DeterministicMatcher:
             record_id=src.record_id,
             category="ambiguous_match",
             severity="medium",
-            reason=f"Record matches {len(candidates)} bank candidates on {matched_on} with no further deterministic discriminator.",
+            reason=f"{reason} Manual review or LLM arbitration is required.",
             confidence=CONFIDENCE["ambiguous"],
             evidence=evidence,
         )
@@ -518,8 +556,10 @@ class DeterministicMatcher:
         evidence = {
             "candidate_count": len(candidates),
             "candidate_record_ids": [c.record_id for c in candidates],
+            "bank_candidates": _candidate_details(candidates),
             "matched_via": matched_on,
         }
+        candidate_summary = _candidate_summary(candidates)
         dec = ReconciliationDecision(
             decision_id=_make_id(),
             source_record_id=src.record_id,
@@ -527,7 +567,10 @@ class DeterministicMatcher:
             decision="ambiguous",
             method="duplicate",
             confidence=CONFIDENCE["ambiguous"],
-            reason=f"Multiple bank records share the same identifier. Possible duplicate bank entries.",
+            reason=(
+                f"{src.record_id} has the same reference as {len(candidates)} bank records: "
+                f"{candidate_summary}. This indicates possible duplicate bank entries."
+            ),
             evidence=evidence,
         )
         aud = AuditRecord(
@@ -544,7 +587,10 @@ class DeterministicMatcher:
             record_id=src.record_id,
             category="duplicate",
             severity="high",
-            reason=f"{len(candidates)} bank records share the same identifier — likely duplicate bank entries.",
+            reason=(
+                f"{len(candidates)} bank records share {src.reference or 'the same identifier'}: "
+                f"{candidate_summary}. Likely duplicate bank entries."
+            ),
             confidence=0.90,
             evidence=evidence,
         )

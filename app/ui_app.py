@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from app.services.schema_mapper import SchemaMapper, MockLLMProvider
+from app.models.mapping import MappingResult
 from app.services.normalizer import Normalizer
 
 from app.services.reconciliation import reconcile, FinalReconciliationResult
@@ -76,7 +77,48 @@ def run_pipeline(razorpay_file=None, bank_file=None, ledger_file=None, fourth_fi
         qa_provider_func = None
         
     mapper = SchemaMapper(llm_provider)
+    deterministic_mapper = SchemaMapper(MockLLMProvider())
     normalizer = Normalizer()
+
+    def map_source(source_name, columns, sample_rows):
+        """Keep known financial columns deterministic; use Gemini only to enrich unknown columns.
+
+        A model response may be partial or malformed.  It must never replace a
+        complete, tested mapping for standard Razorpay or bank exports.
+        """
+        baseline = deterministic_mapper.map_source(source_name, columns, sample_rows)
+        mapped_fields = set(baseline.column_mapping.values())
+        has_amount = "amount" in mapped_fields or "gross_amount" in mapped_fields
+        has_match_signal = bool(mapped_fields & {
+            "reference", "transaction_date", "settlement_date", "posted_date",
+        })
+        # Known exports need no LLM call.  For an unfamiliar export where the
+        # heuristic cannot identify an amount or matching signal, automatically
+        # spend one mapping request for that source. Set the flag to true to
+        # request enrichment for every source; false disables it entirely.
+        mapping_mode = os.environ.get("GEMINI_SCHEMA_MAPPING_ENABLED", "auto").lower()
+        should_use_llm = mapping_mode == "true" or (mapping_mode == "auto" and not (has_amount and has_match_signal))
+        if not (gemini_enabled and api_key_present) or not should_use_llm:
+            return baseline
+        suggested = mapper.map_source(source_name, columns, sample_rows)
+        allowed = {
+            "record_id", "transaction_type", "transaction_id", "order_id", "settlement_id",
+            "reference", "amount", "gross_amount", "fee", "tax", "adjustment", "refund_amount",
+            "currency", "transaction_date", "settlement_date", "posted_date", "counterparty",
+            "description", "metadata",
+        }
+        merged = dict(baseline.column_mapping)
+        for column, field in suggested.column_mapping.items():
+            if column in columns and column not in merged and field in allowed - {"metadata", "record_id"}:
+                merged[column] = field
+        return MappingResult(
+            source_name=source_name,
+            column_mapping=merged,
+            unmapped_columns=[col for col in columns if col not in merged],
+            confidence=baseline.confidence,
+            explanation="Deterministic mapping with validated Gemini enrichment.",
+            audit_info={"provider": "deterministic+gemini"},
+        )
 
     parsed_sources = {}
 
@@ -84,7 +126,7 @@ def run_pipeline(razorpay_file=None, bank_file=None, ledger_file=None, fourth_fi
     if razorpay_file is not None:
         rzp_rows, rzp_cols = parse_uploaded_csv(razorpay_file)
         if rzp_rows:
-            rzp_mapping = mapper.map_source("razorpay", rzp_cols, rzp_rows[:5])
+            rzp_mapping = map_source("razorpay", rzp_cols, rzp_rows[:5])
             parsed_sources["razorpay"] = normalizer.normalize(rzp_rows, rzp_mapping)
 
     # 2. Parse & Normalize Bank Statement (Mandatory Target)
@@ -93,21 +135,21 @@ def run_pipeline(razorpay_file=None, bank_file=None, ledger_file=None, fourth_fi
     bank_rows, bank_cols = parse_uploaded_csv(bank_file)
     if not bank_rows:
         return None
-    bank_mapping = mapper.map_source("bank", bank_cols, bank_rows[:5])
+    bank_mapping = map_source("bank", bank_cols, bank_rows[:5])
     target_records = normalizer.normalize(bank_rows, bank_mapping)
 
     # 3. Optional Merchant Ledger
     if ledger_file is not None:
         ledg_rows, ledg_cols = parse_uploaded_csv(ledger_file)
         if ledg_rows:
-            ledg_mapping = mapper.map_source("merchant_ledger", ledg_cols, ledg_rows[:5])
+            ledg_mapping = map_source("merchant_ledger", ledg_cols, ledg_rows[:5])
             parsed_sources["merchant_ledger"] = normalizer.normalize(ledg_rows, ledg_mapping)
 
     # 4. Optional Fourth Source
     if fourth_file is not None:
         fourth_rows, fourth_cols = parse_uploaded_csv(fourth_file)
         if fourth_rows:
-            fourth_mapping = mapper.map_source("fourth_source", fourth_cols, fourth_rows[:5])
+            fourth_mapping = map_source("fourth_source", fourth_cols, fourth_rows[:5])
             parsed_sources["fourth_source"] = normalizer.normalize(fourth_rows, fourth_mapping)
 
     # Determine primary source_records based on exact backend reconcile contract
@@ -142,6 +184,7 @@ def run_pipeline(razorpay_file=None, bank_file=None, ledger_file=None, fourth_fi
         "source_records": source_records,
         "target_records": target_records,
         "active_source_name": primary_source_name,
+        "llm_mode_enabled": gemini_enabled and api_key_present,
     }
 
 

@@ -1,9 +1,9 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.14-blue?logo=python&logoColor=white" alt="Python 3.14"/>
   <img src="https://img.shields.io/badge/FastAPI-0.141-009688?logo=fastapi&logoColor=white" alt="FastAPI"/>
-  <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white" alt="React 18"/>
-  <img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" alt="TypeScript"/>
-  <img src="https://img.shields.io/badge/Tests-160%20passed-22c55e?logo=pytest&logoColor=white" alt="160 tests"/>
+  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React 19"/>
+  <img src="https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white" alt="TypeScript 6"/>
+  <img src="https://img.shields.io/badge/Testing-pytest-22c55e?logo=pytest&logoColor=white" alt="pytest"/>
 </p>
 
 # Razorpay AI Finance Controller
@@ -44,13 +44,13 @@ Raw CSVs → Schema Mapping → Normalisation → Deterministic Matching (6 rule
 | Feature | Details |
 |---|---|
 | **6-method deterministic matcher** | Exact identifier, exact amount+date, financial reconciliation, amount+date tolerance, batch reconciliation, refund detection |
-| **LLM arbitration (opt-in)** | Only ambiguous records escalate; provider output validated via `LLMArbitrationDecision` Pydantic model before acceptance |
+| **LLM arbitration (opt-in)** | All ambiguous records are sent in one bounded batch; every returned candidate is validated before acceptance |
 | **Grounded Q&A** | Answers computed from verified fact sets; hallucination check on numbers and record IDs |
 | **Four-source support** | Razorpay, Bank, Merchant Ledger, Merchant Payout Export — all through the same canonical pipeline |
 | **Full audit trail** | Every decision has a corresponding `AuditRecord` (stage, method, evidence) |
 | **Exception tracking** | 9 exception categories, high/medium/low severity, structured evidence |
 | **React dashboard** | 5 views: Overview · Decisions Explorer · Exceptions Investigation · Audit Trail · Finance Q&A |
-| **160 backend tests** | Zero failures across M0–M9, covering all matching rules, arbitration, report, Q&A, and API |
+| **Automated tests** | Coverage for matching rules, arbitration, reporting, Q&A, API behavior, and normalization |
 
 ---
 
@@ -104,8 +104,8 @@ Each matched record consumes its bank counterpart from the available pool, preve
 
 The LLM is involved in **two places only:**
 
-1. **Schema Mapper** — reads uploaded CSV column headers and returns a `FieldMapping` dictionary. It makes no reconciliation decisions.
-2. **Arbitration (opt-in)** — receives only records that left the deterministic engine as `ambiguous`. The provider's output must:
+1. **Schema Mapper** — known exports use deterministic header mapping. With `GEMINI_SCHEMA_MAPPING_ENABLED=auto`, Gemini is used once per unfamiliar source schema; it makes no reconciliation decisions.
+2. **Arbitration (opt-in)** — all records that leave the deterministic engine as `ambiguous` are packaged into one request. Each returned decision must:
    - Pass `LLMArbitrationDecision` Pydantic validation
    - Return a candidate ID that exists in the original candidate pool (hallucinated IDs are rejected)
    - If either check fails, the original `ambiguous` decision is preserved
@@ -156,7 +156,7 @@ The Merchant Payout Export uses a completely different column schema (`Payout No
 - [Streamlit](https://streamlit.io/) — retained as fallback UI
 
 **Frontend**
-- [React](https://react.dev/) 18 + [TypeScript](https://www.typescriptlang.org/)
+- [React](https://react.dev/) 19 + [TypeScript](https://www.typescriptlang.org/)  
 - [Vite](https://vitejs.dev/) 8
 - [Tailwind CSS](https://tailwindcss.com/) v4
 - [Recharts](https://recharts.org/) — matching method bar chart
@@ -207,7 +207,7 @@ PYTHONPATH=. uvicorn app.api_app:app --reload --port 8000
 cd frontend
 npm install
 npm run dev
-# Opens: http://localhost:3000
+# Opens: http://localhost:5173
 ```
 
 ### 5. (Optional) Streamlit fallback UI
@@ -225,7 +225,7 @@ source fin_env/bin/activate
 PYTHONPATH=. pytest tests/ -v
 ```
 
-**Test suite coverage (160 tests):**
+**Test suite coverage:**
 
 | File | Milestone | What it covers |
 |---|---|---|
@@ -299,7 +299,7 @@ Every source — regardless of original schema — is normalised into the same P
 
 ### Why `reconcile(source, target, arbitrator=None)`?
 
-The reconciliation pipeline is designed to be fully functional without an LLM. Arbitration is a clean, optional parameter. The current deployment passes no arbitrator, producing fully deterministic results. Wiring in a real LLM provider is a one-line change to the caller.
+The reconciliation pipeline is fully functional without an LLM. When Gemini is enabled, only ambiguous decisions are sent for batch arbitration and every candidate ID is validated against the original candidate pool. Provider errors retain the deterministic ambiguous outcome rather than producing an ungrounded match.
 
 ---
 
@@ -307,9 +307,9 @@ The reconciliation pipeline is designed to be fully functional without an LLM. A
 
 | Area | Current state | Future |
 |---|---|---|
-| LLM provider | Mock only (`MockArbitrationProvider`) | Wire in real OpenAI / Gemini provider via `ArbitrationProvider` abstract interface |
-| Schema mapping | `MockLLMProvider` (deterministic column heuristics) | Real LLM call for true zero-shot schema inference |
-| Q&A | Answers are deterministically formatted fact dumps | Real LLM for fluent answer phrasing, with hallucination check already in place |
+| LLM provider | Gemini is optional, quota-bounded, and validated | Add provider-level usage telemetry and configurable retry policy |
+| Schema mapping | Deterministic mapping with optional Gemini fallback for unfamiliar files | Persist approved mappings per merchant/source |
+| Q&A | Grounded facts with optional Gemini phrasing and deterministic fallback | Add conversational context with retained grounding boundaries |
 | Scale | Single-session, in-memory | Persistent session store (Redis/PostgreSQL) for production |
 | Authentication | None | Merchant-level auth + role-based access |
 | Multi-period | Single file upload per reconciliation run | Bulk/batch reconciliation across date ranges |

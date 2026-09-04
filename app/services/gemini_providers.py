@@ -2,6 +2,7 @@ import os
 import json
 import traceback
 from typing import List, Dict, Any, Type, Optional
+from pydantic import BaseModel, Field
 
 from app.services.schema_mapper import LLMProvider
 from app.services.arbitration_provider import ArbitrationProvider
@@ -16,6 +17,11 @@ except ImportError:
     genai = None
 
 GEMINI_MODEL_DEFAULT = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_TIMEOUT_SECONDS = float(os.environ.get("GEMINI_TIMEOUT_SECONDS", "5"))
+
+
+class GeminiBatchArbitrationResponse(BaseModel):
+    decisions: list[dict[str, Any]] = Field(default_factory=list)
 
 class GeminiProviderMixin:
     """Shared mixin for Gemini-based providers."""
@@ -30,9 +36,12 @@ class GeminiProviderMixin:
 
         genai.configure(api_key=api_key)
         self.model_name = model_name
+        self._available = True
 
     def _generate_structured_json(self, prompt: str, schema_class: Type) -> dict:
         """Call Gemini demanding structured JSON output that conforms to a Pydantic schema."""
+        if not self._available:
+            raise RuntimeError("Gemini is temporarily unavailable for this reconciliation run.")
         model = genai.GenerativeModel(self.model_name)
 
         try:
@@ -44,9 +53,11 @@ class GeminiProviderMixin:
                     response_mime_type="application/json",
                     temperature=0.0  # Must be purely deterministic translation
                 ),
+                request_options={"timeout": GEMINI_TIMEOUT_SECONDS},
             )
             return json.loads(response.text)
         except Exception as e:
+            self._available = False
             # Graceful fallback mechanisms should catch these exceptions in the caller
             raise RuntimeError(f"Gemini API generation failed: {e}\n{traceback.format_exc()}")
 
@@ -164,12 +175,60 @@ Decision Rules:
                 "evidence": {"provider": "GeminiArbitrationProvider_Fallback"}
             }
 
+    def resolve_ambiguities(
+        self,
+        requests: list[tuple[CanonicalTransaction, list[CanonicalTransaction], dict[str, Any]]],
+    ) -> dict[str, dict[str, Any]]:
+        """Resolve all ambiguous rows in one bounded Gemini call."""
+        if not requests:
+            return {}
+        cases = []
+        for source, candidates, evidence in requests:
+            cases.append({
+                "source_record_id": source.record_id,
+                "source": source.model_dump(mode="json", exclude_none=True),
+                "candidate_ids": [candidate.record_id for candidate in candidates],
+                "candidates": [candidate.model_dump(mode="json", exclude_none=True) for candidate in candidates],
+                "deterministic_evidence": evidence,
+            })
+        prompt = f"""
+You are a financial reconciliation arbitrator. Evaluate every case below.
+For each case return one object in `decisions` with source_record_id, decision,
+candidate_record_id, confidence, reason, and evidence.
+
+Rules:
+1. decision is exactly `matched` or `ambiguous`.
+2. A matched candidate_record_id must be one of that case's candidate_ids.
+3. If no single candidate is clearly better, return ambiguous with null candidate_record_id.
+4. Do not invent values, IDs, dates, or amounts.
+
+Cases: {json.dumps(cases, default=str)}
+"""
+        try:
+            response = self._generate_structured_json(prompt, GeminiBatchArbitrationResponse)
+            by_source = {}
+            valid_candidates = {source.record_id: {candidate.record_id for candidate in candidates}
+                                for source, candidates, _ in requests}
+            for item in response.get("decisions", []):
+                source_id = item.get("source_record_id")
+                if source_id not in valid_candidates:
+                    continue
+                if item.get("decision") == "matched" and item.get("candidate_record_id") not in valid_candidates[source_id]:
+                    item = {**item, "decision": "ambiguous", "candidate_record_id": None}
+                by_source[source_id] = item
+            return by_source
+        except Exception as e:
+            # Return no decisions: the arbitration service retains deterministic
+            # ambiguous outcomes without issuing more per-record requests.
+            print(f"[GeminiArbitrationProvider] Batch fallback due to Error: {e}")
+            return {}
+
 
 def gemini_qa_provider_func(fact_set_dict: dict) -> str:
     """
     Given a GroundedFactSet (as dict), produce a conversational answer.
     """
-    model_name = os.environ.get("GEMINI_MODEL", "gemini-1.5-pro")
+    model_name = os.environ.get("GEMINI_MODEL", GEMINI_MODEL_DEFAULT)
     if not genai:
         return ""
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -194,7 +253,8 @@ Respond cleanly in natural language.
         # Standard unstructured text mode
         response = model.generate_content(
             prompt,
-            generation_config=genai.GenerationConfig(temperature=0.0)
+            generation_config=genai.GenerationConfig(temperature=0.0),
+            request_options={"timeout": GEMINI_TIMEOUT_SECONDS},
         )
         return response.text
     except Exception as e:

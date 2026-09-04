@@ -65,6 +65,21 @@ class Normalizer:
                 if col in mapping.column_mapping:
                     canonical_field = mapping.column_mapping[col]
 
+                    # ``metadata`` is the container used for unmapped source
+                    # fields, not a scalar CanonicalTransaction attribute that
+                    # may be passed via ``kwargs``.  LLM schema suggestions can
+                    # legitimately classify a column this way; retain it safely.
+                    if canonical_field == "metadata":
+                        metadata[col] = val
+                        continue
+
+                    # Record IDs are generated internally to remain unique and
+                    # source-scoped. Never let a mapped input column duplicate
+                    # the explicit record_id constructor argument below.
+                    if canonical_field == "record_id":
+                        metadata[col] = val
+                        continue
+
                     if "amount" in canonical_field or canonical_field in ["fee", "tax", "adjustment"]:
                         parsed = self._parse_decimal(val) if val else None
 

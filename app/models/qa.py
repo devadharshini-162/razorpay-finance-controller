@@ -10,6 +10,7 @@ class IntentDefinition(str, enum.Enum):
     SETTLEMENT_TOTAL = "settlement_total"
     FEE_TOTAL = "fee_total"
     TAX_TOTAL = "tax_total"
+    FEE_AND_TAX_TOTAL = "fee_and_tax_total"
     REFUNDS = "refunds"
     BATCH_SETTLEMENTS = "batch_settlements"
     REFERENCE_LOOKUP = "reference_lookup"

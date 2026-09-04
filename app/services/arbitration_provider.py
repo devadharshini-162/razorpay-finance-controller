@@ -19,6 +19,20 @@ class ArbitrationProvider(ABC):
         """
         raise NotImplementedError
 
+    def resolve_ambiguities(
+        self,
+        requests: list[tuple[CanonicalTransaction, list[CanonicalTransaction], dict[str, Any]]],
+    ) -> dict[str, dict[str, Any]]:
+        """Resolve a group of ambiguities.
+
+        Providers that support batching should override this method.  The
+        default maintains compatibility with simple/test providers.
+        """
+        return {
+            source.record_id: self.resolve_ambiguity(source, candidates, evidence)
+            for source, candidates, evidence in requests
+        }
+
 
 class MockArbitrationProvider(ArbitrationProvider):
     """Mock implementation for deterministic testing."""

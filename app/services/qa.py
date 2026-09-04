@@ -38,25 +38,31 @@ class QuestionInterpreter:
                 return ParsedCommand(intent=IntentDefinition.TRANSACTION_EXPLANATION, record_id=record_id)
         
         # 3. Resolution Summary
-        if "match rate" in q or "how many transactions were matched" in q or "how many required llm" in q:
+        if ("match rate" in q or "how many transactions were matched" in q
+                or "how many were matched" in q or "how many required llm" in q
+                or ("matched" in q and ("how many" in q or "count" in q))):
             return ParsedCommand(intent=IntentDefinition.RESOLUTION_SUMMARY)
             
         # 4. Unresolved Records
-        if "unresolved" in q and "transactions" in q:
+        if any(phrase in q for phrase in (
+            "unresolved", "unmatched", "not reconciled", "pending review",
+            "open exception", "exceptions", "failed to match",
+        )):
             return ParsedCommand(intent=IntentDefinition.UNRESOLVED_RECORDS)
         if "ambiguous" in q:
             return ParsedCommand(intent=IntentDefinition.UNRESOLVED_RECORDS)
-        if "not reconciled" in q and not tx_match:
-            return ParsedCommand(intent=IntentDefinition.UNRESOLVED_RECORDS)
-            
         # 5. Settlement Total
         date_match = re.search(r"on (january|february|march|april|may|june|july|august|september|october|november|december)\ \d+", q)
-        if "how much was settled" in q or "settlement amount" in q or "which settlements occurred" in q:
+        if ("how much was settled" in q or "settlement amount" in q
+                or "total settled" in q or "settled amount" in q
+                or "which settlements occurred" in q):
             dt_str = date_match.group(0).replace("on ", "").strip().title() if date_match else None
             return ParsedCommand(intent=IntentDefinition.SETTLEMENT_TOTAL, date=dt_str)
             
         # 6. Fee Total
-        if "deducted in fees" in q or "how much fee" in q:
+        if ("fee" in q or "fees" in q) and ("gst" in q or "tax" in q):
+            return ParsedCommand(intent=IntentDefinition.FEE_AND_TAX_TOTAL)
+        if "deducted in fees" in q or "how much fee" in q or "total fee" in q or "fees deducted" in q:
             return ParsedCommand(intent=IntentDefinition.FEE_TOTAL)
             
         # 7. Tax Total
@@ -211,10 +217,7 @@ class FactComputer:
             return fact_set
             
         if cmd.intent == IntentDefinition.SETTLEMENT_TOTAL:
-            if not cmd.date:
-                fact_set.insufficient_evidence = True
-                return fact_set
-            recs = self.retriever.filter_by_date(cmd.date)
+            recs = self.retriever.filter_by_date(cmd.date) if cmd.date else self.retriever.source_records
             if not recs:
                 fact_set.insufficient_evidence = True
                 return fact_set
@@ -222,7 +225,7 @@ class FactComputer:
             total = sum((r.amount for r in recs if r.amount is not None), Decimal('0'))
             fact_set.record_ids = [r.record_id for r in recs]
             fact_set.facts = {
-                "date": cmd.date,
+                "date": cmd.date or "the full dataset",
                 "count": len(recs),
                 "total_settlement": float(total)
             }
@@ -242,6 +245,14 @@ class FactComputer:
             total = sum((r.tax for r in recs if r.tax is not None), Decimal('0'))
             fact_set.facts = {"total_tax": float(total)}
             fact_set.numerical_values = [float(total)]
+            return fact_set
+
+        if cmd.intent == IntentDefinition.FEE_AND_TAX_TOTAL:
+            recs = self.retriever.source_records
+            total_fee = sum((r.fee for r in recs if r.fee is not None), Decimal('0'))
+            total_tax = sum((r.tax for r in recs if r.tax is not None), Decimal('0'))
+            fact_set.facts = {"total_fee": float(total_fee), "total_tax": float(total_tax)}
+            fact_set.numerical_values = [float(total_fee), float(total_tax)]
             return fact_set
 
         if cmd.intent == IntentDefinition.REFUNDS:
@@ -299,15 +310,106 @@ class AnswerGenerator:
         # provider_func takes GroundedFactSet (as dict/str) and returns a raw string
         self.provider_func = provider_func
 
+    def _generate_fallback_answer(self, fact_set: GroundedFactSet) -> str:
+        """Generate human-friendly fallback answers based on intent and facts."""
+        intent = fact_set.intent
+        facts = fact_set.facts
+        
+        if intent == IntentDefinition.RESOLUTION_SUMMARY:
+            total = facts.get("total_source_records", 0)
+            det_matches = facts.get("deterministic_matches", 0)
+            llm_matches = facts.get("llm_resolved_matches", 0)
+            ambiguous = facts.get("ambiguous_records", 0)
+            unmatched = facts.get("unmatched_records", 0)
+            rate = facts.get("overall_resolution_rate", 0)
+            
+            return (
+                f"Out of {total} source transactions, {det_matches} were matched using deterministic rules "
+                f"and {llm_matches} were resolved by arbitration. "
+                f"This gives us an overall resolution rate of {rate:.1f}%. "
+                f"There are {ambiguous} ambiguous records and {unmatched} unmatched records still pending review."
+            )
+        
+        elif intent == IntentDefinition.UNRESOLVED_RECORDS:
+            count = facts.get("count", 0)
+            ambiguous_ids = facts.get("ambiguous", [])
+            unmatched_ids = facts.get("unmatched", [])
+            
+            response = f"There are {count} unresolved records in total. "
+            if ambiguous_ids:
+                response += f"{len(ambiguous_ids)} are ambiguous and need manual review. "
+            if unmatched_ids:
+                response += f"{len(unmatched_ids)} are completely unmatched and not found in the bank statement."
+            return response.strip()
+        
+        elif intent == IntentDefinition.TRANSACTION_EXPLANATION:
+            decision = facts.get("decision", "unknown")
+            method = facts.get("method", "unknown")
+            reason = facts.get("reason", "No reason provided")
+            
+            return (
+                f"This transaction was {decision} using the '{method}' method. "
+                f"The reasoning: {reason}"
+            )
+        
+        elif intent == IntentDefinition.SETTLEMENT_TOTAL:
+            date = facts.get("date", "unknown date")
+            count = facts.get("count", 0)
+            total = facts.get("total_settlement", 0)
+            
+            if count == 0:
+                return f"No settlements were found for {date}."
+            return f"On {date}, {count} settlement(s) totaling ₹{total:,.2f} were processed."
+        
+        elif intent == IntentDefinition.FEE_TOTAL:
+            total_fee = facts.get("total_fee", 0)
+            return f"The total fees deducted across all transactions is ₹{total_fee:,.2f}."
+        
+        elif intent == IntentDefinition.TAX_TOTAL:
+            total_tax = facts.get("total_tax", 0)
+            return f"The total GST/tax charged across all transactions is ₹{total_tax:,.2f}."
+        
+        elif intent == IntentDefinition.FEE_AND_TAX_TOTAL:
+            return (
+                f"Total processing fees are ₹{facts.get('total_fee', 0):,.2f} and "
+                f"GST/tax is ₹{facts.get('total_tax', 0):,.2f}."
+            )
+        
+        elif intent == IntentDefinition.REFUNDS:
+            count = facts.get("count", 0)
+            if count == 0:
+                return "No refunds were found in the reconciliation data."
+            return f"There are {count} refund(s) in the dataset that have been identified and tracked."
+        
+        elif intent == IntentDefinition.BATCH_SETTLEMENTS:
+            batch_count = facts.get("batch_decisions_count", 0)
+            if batch_count == 0:
+                return "No batch settlements were found in this reconciliation."
+            return f"There are {batch_count} batch settlement(s) where multiple source records were matched against a single bank credit."
+        
+        elif intent == IntentDefinition.REFERENCE_LOOKUP:
+            reference = facts.get("reference", "unknown")
+            matches_count = facts.get("matches_count", 0)
+            statuses = facts.get("statuses", [])
+            
+            if matches_count == 0:
+                return f"No transactions found with reference '{reference}'."
+            
+            status_summary = ", ".join(statuses) if statuses else "unknown"
+            return f"Found {matches_count} transaction(s) matching reference '{reference}'. Status: {status_summary}."
+        
+        else:
+            return "I'm not able to answer that question. Please try asking about resolution rate, unmatched records, specific transactions, settlement totals, fees, taxes, refunds, or batch settlements."
+
     def generate(self, fact_set: GroundedFactSet) -> GroundedAnswer:
         if fact_set.insufficient_evidence:
             return GroundedAnswer(
-                answer="I couldn't find enough evidence in the reconciled records to answer that.",
+                answer="I couldn't find enough information in the reconciled records to answer that. Please try a different question.",
                 evidence={}
             )
 
-        # Baseline fallback formatting
-        fallback_answer = f"Verified Facts for {fact_set.intent.name}:\n{fact_set.facts}\nRelevant Records: {fact_set.record_ids}"
+        # Generate fallback answer for when LLM is not available
+        fallback_answer = self._generate_fallback_answer(fact_set)
 
         if not self.provider_func:
             return GroundedAnswer(answer=fallback_answer, evidence={"record_ids": fact_set.record_ids, "facts": fact_set.facts})

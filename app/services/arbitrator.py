@@ -35,6 +35,7 @@ class LLMArbitrationService:
         source_map = {tx.record_id: tx for tx in source_records}
         target_map = {tx.record_id: tx for tx in target_records}
 
+        pending: list[tuple[ReconciliationDecision, CanonicalTransaction, list[CanonicalTransaction], dict]] = []
         for decision in match_result.decisions:
             if decision.decision != "ambiguous":
                 continue
@@ -50,18 +51,28 @@ class LLMArbitrationService:
             if not source_record:
                 continue
 
+            pending.append((decision, source_record, candidates, original_evidence))
+
+        # One batch request prevents a large ambiguous upload from consuming a
+        # separate model request per row. Each response is still validated
+        # independently below.
+        try:
+            raw_responses = self.provider.resolve_ambiguities([
+                (source, candidates, evidence)
+                for _, source, candidates, evidence in pending
+            ])
+        except Exception as e:
+            logger.error(f"Batch provider call crashed: {e}")
+            raw_responses = {}
+
+        for decision, source_record, candidates, original_evidence in pending:
+
             # -----------------------------------------------------------------
             # 1. Invoke Provider (untrusted)
             # -----------------------------------------------------------------
-            try:
-                raw_response = self.provider.resolve_ambiguity(
-                    source_record=source_record,
-                    candidates=candidates,
-                    deterministic_evidence=original_evidence,
-                )
-            except Exception as e:
-                logger.error(f"Provider crashed on {decision.source_record_id}: {e}")
-                continue  # keep original ambiguous decision
+            raw_response = raw_responses.get(source_record.record_id)
+            if not raw_response:
+                continue  # keep the original deterministic ambiguity
 
             # -----------------------------------------------------------------
             # 2. Validate provider output via Pydantic model

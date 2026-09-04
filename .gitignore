@@ -9,6 +9,7 @@ __pycache__/
 .venv/
 venv/
 env/
+fin_env/
 
 # Environment / secrets
 .env
@@ -41,3 +42,15 @@ htmlcov/
 uploads/
 outputs/milestone3_final_report.md
 milestone3_final_report.md
+
+# Local delivery notes and one-off verification artifacts
+API_TEST_RESULTS.md
+CORE_FIXES_REPORT.md
+FIXES_QUICK_REFERENCE.md
+INTEGRATION_AUDIT.md
+ISSUES_FIXED_VERIFICATION.md
+QA_EXAMPLES.md
+SUMMARY.md
+VISUAL_TESTING_GUIDE.md
+test_api_integration.py
+test_qa_quick.py

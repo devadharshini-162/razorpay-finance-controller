@@ -47,6 +47,7 @@ export interface AuditRecord {
 export interface ReconcileResponse {
   session_id: string;
   active_source_name: string;
+  llm_mode_enabled: boolean;
   report: ReconciliationReport;
   decisions: ReconciliationDecision[];
   exceptions: ExceptionRecord[];

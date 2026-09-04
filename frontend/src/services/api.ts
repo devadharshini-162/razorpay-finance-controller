@@ -61,3 +61,23 @@ export async function checkHealthApi(): Promise<{ status: string; active_session
   if (!res.ok) throw new Error('API server unavailable');
   return await res.json();
 }
+
+export async function downloadReconciliationExport(sessionId: string, format: 'csv' | 'xlsx'): Promise<void> {
+  const res = await fetch(`/api/session/${sessionId}/export?format=${format}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    if (res.status === 404) {
+      throw new Error('Export is unavailable on the running backend. Restart the backend, then run reconciliation again.');
+    }
+    throw new Error(body.detail || `Could not create the ${format.toUpperCase()} export.`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `reconciliation.${format}`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}

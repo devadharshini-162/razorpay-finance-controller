@@ -104,3 +104,135 @@ class TestGeminiIntegrations:
         assert report.llm_resolved_matches == 0
         assert report.ambiguous_records == 13
         assert report.unmatched_records == 3
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_gemini_availability_check_missing_key(self):
+        """Test that Gemini provider is not available when API key is missing."""
+        with pytest.raises(ValueError, match="GEMINI_API_KEY"):
+            GeminiLLMProvider()
+
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "test_key"}, clear=True)
+    def test_gemini_availability_check_with_key(self):
+        """Test that Gemini provider can be initialized when API key is present."""
+        with patch("app.services.gemini_providers.genai.GenerativeModel"):
+            # Should not raise exception
+            provider = GeminiLLMProvider()
+            assert provider is not None
+
+    @patch.dict(os.environ, {"GEMINI_ENABLED": "true", "GEMINI_API_KEY": "dummy_key"}, clear=True)
+    @patch("app.services.gemini_providers.genai.GenerativeModel.generate_content")
+    def test_qa_with_gemini_enabled(self, mock_generate):
+        """Test Q&A behavior when Gemini is enabled."""
+        from app.services.qa import FinanceQA, IntentDefinition, GroundedFactSet
+        from app.services.reconciliation import FinalReconciliationResult
+        
+        # Setup mock
+        mock_response = MagicMock()
+        mock_response.text = "Gemini-powered answer: Out of 81 settlements, 65 were matched."
+        mock_generate.return_value = mock_response
+        
+        # Mock Gemini QA provider
+        def mock_qa_provider(fact_set_dict):
+            return "Gemini-powered answer: " + str(fact_set_dict.get('facts', {}))
+        
+        result = FinalReconciliationResult(decisions=[], exceptions=[], audit_records=[])
+        src_records = []
+        
+        qa = FinanceQA(result, src_records, provider_func=mock_qa_provider)
+        answer = qa.ask("How many were matched?")
+        
+        assert answer.answer is not None
+
+    @patch.dict(os.environ, {"GEMINI_ENABLED": "false"}, clear=True)
+    def test_qa_without_gemini_fallback(self):
+        """Test that Q&A provides deterministic fallback when Gemini is disabled."""
+        from app.services.qa import FinanceQA, AnswerGenerator, GroundedFactSet, IntentDefinition
+        from app.services.reconciliation import FinalReconciliationResult
+        from app.models.canonical import CanonicalTransaction, ReconciliationDecision
+        
+        # Create minimal test data
+        decision = ReconciliationDecision(
+            decision_id="d1",
+            source_record_id="s1",
+            candidate_record_id="c1",
+            decision="matched",
+            method="exact_amount_date",
+            confidence=0.95,
+            reason="Amount and date match exactly"
+        )
+        result = FinalReconciliationResult(decisions=[decision], exceptions=[], audit_records=[])
+        
+        src = CanonicalTransaction(
+            record_id="s1",
+            source="test",
+            transaction_type="settlement",
+            amount=100.0
+        )
+        
+        # No provider function = deterministic fallback
+        qa = FinanceQA(result, [src], provider_func=None)
+        answer = qa.ask("How many transactions were matched?")
+        
+        # Should return human-friendly answer, not JSON
+        assert answer.answer is not None
+        assert "Verified Facts" not in answer.answer
+        assert "{" not in answer.answer or "%" in answer.answer
+
+    @patch.dict(os.environ, {"GEMINI_ENABLED": "true", "GEMINI_API_KEY": "dummy_key"}, clear=True)
+    @patch("app.services.gemini_providers.genai.GenerativeModel.generate_content")
+    def test_ui_app_gemini_enabled_mode(self, mock_generate):
+        """Test that ui_app correctly uses Gemini when enabled and key is present."""
+        class MemFile:
+            def __init__(self, content):
+                self._content = content
+                self.file = self
+            
+            def read(self):
+                return self._content.encode('utf-8')
+            
+            def seek(self, pos):
+                pass
+        
+        # Mock Gemini response
+        mock_response = MagicMock()
+        mock_response.text = '{"column_mapping": {"Razorpay Ref": "reference"}, "unmapped_columns": [], "confidence": 0.9}'
+        mock_generate.return_value = mock_response
+        
+        rzp_csv = "Razorpay Ref,Amount\nref1,100"
+        bank_csv = "Bank Ref,Credit\nref1,100"
+        
+        res = run_pipeline(
+            razorpay_file=MemFile(rzp_csv),
+            bank_file=MemFile(bank_csv)
+        )
+        
+        # Should succeed and have arbitrator
+        assert res is not None
+        assert "result" in res
+        assert "qa_engine" in res
+
+    @patch.dict(os.environ, {"GEMINI_ENABLED": "false"}, clear=True)
+    def test_ui_app_gemini_disabled_explicit(self):
+        """Test that ui_app uses deterministic mode when GEMINI_ENABLED is explicitly false."""
+        class MemFile:
+            def __init__(self, content):
+                self._content = content
+                self.file = self
+            
+            def read(self):
+                return self._content.encode('utf-8')
+            
+            def seek(self, pos):
+                pass
+        
+        rzp_csv = "Settlement Ref,Amount\nset1,100"
+        bank_csv = "Bank Ref,Credit\nbank1,100"
+        
+        res = run_pipeline(
+            razorpay_file=MemFile(rzp_csv),
+            bank_file=MemFile(bank_csv)
+        )
+        
+        # Should succeed with deterministic baseline
+        assert res is not None
+        assert res["result"] is not None

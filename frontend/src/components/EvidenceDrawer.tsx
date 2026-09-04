@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, Code, FileText } from 'lucide-react';
+import React from 'react';
+import { X, FileText } from 'lucide-react';
 
 interface EvidenceDrawerProps {
   isOpen: boolean;
@@ -18,33 +18,65 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({
   reason,
   evidence,
 }) => {
-  const [showRawJson, setShowRawJson] = useState(false);
-
   if (!isOpen) return null;
+
+  // Format values to be human-readable
+  const formatValue = (v: any): string => {
+    if (v === null || v === undefined) return '—';
+    if (typeof v === 'boolean') return v ? '✓ Yes' : '✗ No';
+    if (typeof v === 'number') {
+      if (Number.isInteger(v)) return v.toLocaleString();
+      return v.toFixed(2);
+    }
+    if (Array.isArray(v)) {
+      if (v.length === 0) return '(empty)';
+      if (typeof v[0] === 'string' && v.every(item => typeof item === 'string')) {
+        return v.join(', ');
+      }
+      return `${v.length} item${v.length === 1 ? '' : 's'}`;
+    }
+    if (typeof v === 'object') return '(see details)';
+    return String(v);
+  };
+
+  // Prettify key names
+  const prettifyKey = (key: string): string => {
+    return key
+      .replace(/_/g, ' ')
+      .replace(/([A-Z])/g, ' $1')
+      .replace(/\b\w/g, (l) => l.toUpperCase())
+      .trim();
+  };
 
   // Flatten evidence object into clean key-value pairs
   const renderStructuredEvidence = (obj: Record<string, any>) => {
-    const entries: { label: string; value: string }[] = [];
-
-    const formatVal = (v: any): string => {
-      if (v === null || v === undefined) return '-';
-      if (typeof v === 'boolean') return v ? 'True' : 'False';
-      if (typeof v === 'object') return JSON.stringify(v);
-      return String(v);
-    };
+    const entries: { label: string; value: string; rawValue?: any }[] = [];
 
     Object.entries(obj).forEach(([key, val]) => {
-      const formattedKey = key
-        .replace(/_/g, ' ')
-        .replace(/\b\w/g, (l) => l.toUpperCase());
+      const formattedKey = prettifyKey(key);
 
-      if (val && typeof val === 'object' && !Array.isArray(val)) {
+      if (val && typeof val === 'object' && !Array.isArray(val) && Object.keys(val).length > 0) {
+        // Nested object - expand it
         Object.entries(val).forEach(([subK, subV]) => {
-          const subLabel = `${formattedKey} → ${subK.replace(/_/g, ' ')}`;
-          entries.push({ label: subLabel, value: formatVal(subV) });
+          const subLabel = `${formattedKey} / ${prettifyKey(subK)}`;
+          entries.push({ label: subLabel, value: formatValue(subV), rawValue: subV });
         });
+      } else if (Array.isArray(val) && val.length > 0) {
+        if (val.every(item => item && typeof item === 'object' && !Array.isArray(item))) {
+          val.forEach((item, itemIndex) => {
+            Object.entries(item).forEach(([subKey, subValue]) => {
+              entries.push({
+                label: `${formattedKey} ${itemIndex + 1} / ${prettifyKey(subKey)}`,
+                value: formatValue(subValue),
+                rawValue: subValue,
+              });
+            });
+          });
+        } else {
+          entries.push({ label: formattedKey, value: val.map(String).join(', '), rawValue: val });
+        }
       } else {
-        entries.push({ label: formattedKey, value: formatVal(val) });
+        entries.push({ label: formattedKey, value: formatValue(val), rawValue: val });
       }
     });
 
@@ -52,6 +84,8 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({
   };
 
   const evidencePairs = renderStructuredEvidence(evidence);
+  const bankCandidates = Array.isArray(evidence.bank_candidates) ? evidence.bank_candidates : [];
+  const generalEvidencePairs = evidencePairs.filter((pair) => !pair.label.startsWith('Bank Candidates'));
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/50 backdrop-blur-xs transition-opacity">
@@ -95,20 +129,28 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({
               <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 Match & Fact Evidence
               </h3>
-              <button
-                onClick={() => setShowRawJson(!showRawJson)}
-                className="flex items-center gap-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
-              >
-                <Code className="h-3.5 w-3.5" />
-                <span>{showRawJson ? 'View Table' : 'View Raw JSON'}</span>
-              </button>
             </div>
 
-            {showRawJson ? (
-              <pre className="rounded-xl border border-slate-800 bg-slate-950 p-4 text-xs font-mono text-emerald-400 overflow-x-auto">
-                {JSON.stringify(evidence, null, 2)}
-              </pre>
-            ) : evidencePairs.length > 0 ? (
+            {bankCandidates.length > 0 && (
+              <div className="mb-4 space-y-3">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Bank candidates to compare</h3>
+                {bankCandidates.map((candidate, index) => (
+                  <div key={candidate.record_id || index} className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/40 dark:bg-amber-950/20 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-xs font-bold text-slate-900 dark:text-white">{candidate.record_id || `Candidate ${index + 1}`}</span>
+                      <span className="rounded-full bg-amber-100 dark:bg-amber-900/50 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:text-amber-300">Candidate {index + 1}</span>
+                    </div>
+                    <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px]">
+                      <div><dt className="text-slate-500">Amount</dt><dd className="font-semibold text-slate-900 dark:text-white">{candidate.amount ? `₹${candidate.amount}` : 'Not supplied'}</dd></div>
+                      <div><dt className="text-slate-500">Date</dt><dd className="font-semibold text-slate-900 dark:text-white">{candidate.date || 'Not supplied'}</dd></div>
+                      <div className="col-span-2"><dt className="text-slate-500">Reference</dt><dd className="font-semibold text-slate-900 dark:text-white">{candidate.reference || 'Not supplied'}</dd></div>
+                      {candidate.description && <div className="col-span-2"><dt className="text-slate-500">Description</dt><dd className="font-semibold text-slate-900 dark:text-white">{candidate.description}</dd></div>}
+                    </dl>
+                  </div>
+                ))}
+              </div>
+            )}
+            {generalEvidencePairs.length > 0 ? (
               <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
                 <table className="w-full text-left text-xs">
                   <thead className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400">
@@ -117,13 +159,13 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({
                       <th className="px-4 py-2.5 font-semibold">Value</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800 font-mono">
-                    {evidencePairs.map((pair, idx) => (
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                    {generalEvidencePairs.map((pair, idx) => (
                       <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
-                        <td className="px-4 py-2.5 font-sans font-medium text-slate-600 dark:text-slate-300">
+                        <td className="px-4 py-2.5 font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">
                           {pair.label}
                         </td>
-                        <td className="px-4 py-2.5 font-mono text-slate-900 dark:text-white break-all">
+                        <td className="px-4 py-2.5 text-slate-900 dark:text-white break-words max-w-xs">
                           {pair.value}
                         </td>
                       </tr>
