@@ -210,12 +210,23 @@ Cases: {json.dumps(cases, default=str)}
             valid_candidates = {source.record_id: {candidate.record_id for candidate in candidates}
                                 for source, candidates, _ in requests}
             for item in response.get("decisions", []):
+                if not isinstance(item, dict):
+                    continue
                 source_id = item.get("source_record_id")
                 if source_id not in valid_candidates:
                     continue
-                if item.get("decision") == "matched" and item.get("candidate_record_id") not in valid_candidates[source_id]:
-                    item = {**item, "decision": "ambiguous", "candidate_record_id": None}
-                by_source[source_id] = item
+                # source_record_id belongs to the batch envelope, not the
+                # strict LLMArbitrationDecision contract. Gemini may also
+                # return a concise evidence string; retain it under a stable
+                # dictionary key so the downstream validator can accept it.
+                decision = {key: value for key, value in item.items() if key != "source_record_id"}
+                if not isinstance(decision.get("evidence"), dict):
+                    decision["evidence"] = {
+                        "provider_summary": str(decision.get("evidence") or "Gemini batch arbitration")
+                    }
+                if decision.get("decision") == "matched" and decision.get("candidate_record_id") not in valid_candidates[source_id]:
+                    decision = {**decision, "decision": "ambiguous", "candidate_record_id": None}
+                by_source[source_id] = decision
             return by_source
         except Exception as e:
             # Return no decisions: the arbitration service retains deterministic

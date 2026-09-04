@@ -8,6 +8,21 @@ from app.models.canonical import CanonicalTransaction
 from app.ui_app import run_pipeline
 
 class TestGeminiIntegrations:
+
+    def test_batch_response_is_normalized_for_strict_decision_validation(self):
+        """Batch-only routing fields and string evidence must not invalidate a decision."""
+        from app.services.gemini_providers import GeminiArbitrationProvider
+        source = CanonicalTransaction(record_id="s1", source="source", transaction_type="unknown", amount=100.0)
+        candidate = CanonicalTransaction(record_id="b1", source="bank", transaction_type="unknown", amount=100.0)
+        provider = object.__new__(GeminiArbitrationProvider)
+        provider._generate_structured_json = lambda *_: {"decisions": [{
+            "source_record_id": "s1", "decision": "ambiguous", "candidate_record_id": None,
+            "confidence": 0.5, "reason": "Both candidates have the same amount and date.",
+            "evidence": "amount, date",
+        }]}
+        result = provider.resolve_ambiguities([(source, [candidate], {})])
+        assert "source_record_id" not in result["s1"]
+        assert result["s1"]["evidence"] == {"provider_summary": "amount, date"}
     
     @patch.dict(os.environ, {"GEMINI_API_KEY": "dummy_key"}, clear=True)
     @patch("app.services.gemini_providers.genai.GenerativeModel.generate_content")
