@@ -6,8 +6,12 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import csv
 import io
+import os
 import streamlit as st
 import pandas as pd
+
+from dotenv import load_dotenv
+load_dotenv()
 
 from app.services.schema_mapper import SchemaMapper, MockLLMProvider
 from app.services.normalizer import Normalizer
@@ -15,6 +19,10 @@ from app.services.normalizer import Normalizer
 from app.services.reconciliation import reconcile, FinalReconciliationResult
 from app.services.report import generate_reconciliation_report, ReconciliationReport
 from app.services.qa import FinanceQA
+from app.services.arbitrator import LLMArbitrationService
+
+from app.services.arbitration_provider import MockArbitrationProvider
+from app.services.gemini_providers import GeminiLLMProvider, GeminiArbitrationProvider, gemini_qa_provider_func
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +54,22 @@ def parse_uploaded_csv(uploaded_file):
 
 def run_pipeline(razorpay_file=None, bank_file=None, ledger_file=None, fourth_file=None, primary_source_name="razorpay"):
     """Orchestrates existing backend services without modifying semantics."""
-    mapper = SchemaMapper(MockLLMProvider())
+    
+    gemini_enabled = os.environ.get("GEMINI_ENABLED", "false").lower() == "true"
+    api_key_present = bool(os.environ.get("GEMINI_API_KEY"))
+    
+    if gemini_enabled and api_key_present:
+        print("[System] Running in GEMINI-ENABLED mode.")
+        llm_provider = GeminiLLMProvider()
+        arbitration_provider = GeminiArbitrationProvider()
+        qa_provider_func = gemini_qa_provider_func
+    else:
+        print("[System] Running in DETERMINISTIC mode.")
+        llm_provider = MockLLMProvider()
+        arbitration_provider = MockArbitrationProvider()
+        qa_provider_func = None
+        
+    mapper = SchemaMapper(llm_provider)
     normalizer = Normalizer()
 
     parsed_sources = {}
@@ -90,16 +113,21 @@ def run_pipeline(razorpay_file=None, bank_file=None, ledger_file=None, fourth_fi
     else:
         return None
 
-    # 5. Execute Deterministic Reconciliation (no arbitrator injected at UI layer)
-    # Arbitration is a backend-level concern. The UI must not introduce its own
-    # arbitration semantics. Pass no arbitrator so reconcile() runs deterministic-only.
-    result = reconcile(source_records, target_records)
+    # 5. Execute Deterministic Reconciliation
+    # Arbitration is injected conditionally. If purely deterministic rules are required, it gets None.
+    # Here, to test the Gemini capabilities while degrading gracefully, we wire the arbitrator.
+    if gemini_enabled and api_key_present:
+        arbitrator = LLMArbitrationService(provider=arbitration_provider)
+    else:
+        arbitrator = None
+        
+    result = reconcile(source_records, target_records, arbitrator=arbitrator)
 
     # 6. Generate Report
     report = generate_reconciliation_report(result)
 
     # 7. Initialize Q&A Engine
-    qa_engine = FinanceQA(result, source_records)
+    qa_engine = FinanceQA(result, source_records, provider_func=qa_provider_func)
 
     return {
         "result": result,
