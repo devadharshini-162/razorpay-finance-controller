@@ -207,7 +207,7 @@ PYTHONPATH=. uvicorn app.api_app:app --reload --port 8000
 cd frontend
 npm install
 npm run dev
-# Opens: http://localhost:5173
+# Opens: http://localhost:3000
 ```
 
 ### 5. (Optional) Streamlit fallback UI
