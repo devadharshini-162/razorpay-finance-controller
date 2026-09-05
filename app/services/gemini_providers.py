@@ -265,13 +265,13 @@ DETERMINISTIC EVIDENCE:
 CANDIDATE RECORDS:
 """
 
-for i, cand in enumerate(candidates):
-    prompt += f"""
+        for i, cand in enumerate(candidates):
+            prompt += f"""
 --- CANDIDATE {i + 1} ---
 {cand.model_dump_json(exclude_none=True)}
 """
 
-prompt += f"""
+        prompt += f"""
 
 ALLOWED CANDIDATE IDS:
 {json.dumps(valid_candidate_ids)}
@@ -319,17 +319,6 @@ DECISION RULES:
 14. Keep the reason concise and factual. Mention the specific evidence that
     distinguishes the selected candidate, or explain why the case remains
     ambiguous.
-"""
-        for i, cand in enumerate(candidates):
-            prompt += f"\n--- Candidate {i+1} ---\n{cand.model_dump_json(exclude_none=True)}"
-
-        prompt += f"""
-
-Decision Rules:
-1. "decision" must be exactly "matched" or "ambiguous".
-2. "candidate_record_id" MUST strictly be one of: {valid_candidate_ids}. If no single clear match, use null.
-3. You must not invent candidate ids or facts.
-4. "confidence" must be between 0.0 and 1.0.
 """
 
         try:

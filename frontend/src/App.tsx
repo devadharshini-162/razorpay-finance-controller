@@ -49,22 +49,6 @@ export function AppContent() {
       .catch(() => setIsBackendHealthy(false));
   }, []);
 
-  // Demo CSV helper: Create a default synthetic file if user clicks "Load Demo Data"
-  const handleLoadDemoData = () => {
-    const rzpCsv =
-      "Settlement Ref,Order Reference,Gross,Processing Fee,GST,Settled Amount,Settlement Date,UTR\n" +
-      "set_1001,order_1001,1000.00,18.00,3.24,978.76,2026-09-01,UTR1001\n" +
-      "set_1002,order_1002,2500.00,45.00,8.10,2446.90,2026-09-01,UTR1002\n";
-
-    const bankCsv =
-      "Txn ID,Txn Date,Narration,Credit,Debit,Bank Ref,Running Balance\n" +
-      "tx_1001,2026-09-01,Razorpay Settlement UTR1001,978.76,0.00,UTR1001,100000.00\n" +
-      "tx_1002,2026-09-01,Razorpay Settlement UTR1002,2446.90,0.00,UTR1002,102446.90\n";
-
-    setRazorpayFile(new File([rzpCsv], "razorpay_settlements.csv", { type: "text/csv" }));
-    setBankFile(new File([bankCsv], "bank_statement.csv", { type: "text/csv" }));
-  };
-
   const handleRunReconciliation = async () => {
     const errors: string[] = [];
     
@@ -164,14 +148,6 @@ export function AppContent() {
             </div>
 
             <div className="flex items-center gap-3">
-              <button
-                onClick={handleLoadDemoData}
-                className="flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 px-3.5 py-2 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-all"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-                <span>Load Demo CSVs</span>
-              </button>
-
               <div className="flex items-center gap-2">
                 <Sliders className="h-4 w-4 text-slate-400" />
                 <select
@@ -315,7 +291,7 @@ export function AppContent() {
               No Active Reconciliation Dataset
             </h3>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-              Upload your Bank Statement CSV and Razorpay / Merchant CSV sources above or click <strong>"Load Demo CSVs"</strong> to run your first reconciliation.
+              Upload your Bank Statement CSV and Razorpay / Merchant CSV sources above to run your first reconciliation.
             </p>
           </div>
         )}
