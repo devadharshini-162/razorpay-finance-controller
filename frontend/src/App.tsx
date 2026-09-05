@@ -10,7 +10,6 @@ import {
   RefreshCw,
   Sliders,
   FileSpreadsheet,
-  Download,
 } from 'lucide-react';
 import { ThemeProvider } from './context/ThemeContext';
 import { Navbar } from './components/Navbar';
@@ -22,7 +21,7 @@ import { ExceptionsPage } from './pages/ExceptionsPage';
 import { AuditPage } from './pages/AuditPage';
 import { QAPage } from './pages/QAPage';
 import type { ReconcileResponse } from './types';
-import { runReconciliationApi, checkHealthApi, downloadReconciliationExport } from './services/api';
+import { runReconciliationApi, checkHealthApi, downloadExceptionExport, downloadReconciliationExport } from './services/api';
 
 export function AppContent() {
   const [activeTab, setActiveTab] = useState<string>('overview');
@@ -30,7 +29,7 @@ export function AppContent() {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [errorTitle, setErrorTitle] = useState('Missing Required Files');
-  const [exporting, setExporting] = useState<'csv' | 'xlsx' | null>(null);
+  const [exporting, setExporting] = useState<string | null>(null);
 
   // File Upload State
   const [razorpayFile, setRazorpayFile] = useState<File | null>(null);
@@ -91,11 +90,11 @@ export function AppContent() {
     }
   };
 
-  const handleExport = async (format: 'csv' | 'xlsx') => {
+  const handleExport = async (report: 'reconciliation' | 'exceptions', format: 'csv' | 'xlsx') => {
     if (!reconcileData) return;
-    setExporting(format);
+    setExporting(`${report}-${format}`);
     try {
-      await downloadReconciliationExport(reconcileData.session_id, format);
+      await (report === 'exceptions' ? downloadExceptionExport : downloadReconciliationExport)(reconcileData.session_id, format);
     } catch (err: any) {
       setError(err.message || 'Could not download the reconciliation export.');
       setErrorTitle('Download Failed');
@@ -254,21 +253,11 @@ export function AppContent() {
                 );
               })}
               </div>
-              <div className="flex items-center gap-2 pb-2 shrink-0">
-                <span className="hidden md:inline text-xs font-medium text-slate-500 dark:text-slate-400">Download records</span>
-                {(['csv', 'xlsx'] as const).map((format) => (
-                  <button key={format} onClick={() => handleExport(format)} disabled={exporting !== null}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:border-blue-500 hover:text-blue-600 disabled:opacity-50">
-                    <Download className="h-3.5 w-3.5" />
-                    {exporting === format ? 'Preparing…' : format.toUpperCase()}
-                  </button>
-                ))}
-              </div>
             </div>
 
             {/* Active View */}
             {activeTab === 'overview' && (
-              <OverviewPage report={reconcileData.report} onNavigateTab={setActiveTab} />
+              <OverviewPage report={reconcileData.report} onNavigateTab={setActiveTab} onExport={handleExport} exporting={exporting} />
             )}
             {activeTab === 'decisions' && (
               <DecisionsPage decisions={reconcileData.decisions} />

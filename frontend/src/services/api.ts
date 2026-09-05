@@ -63,7 +63,16 @@ export async function checkHealthApi(): Promise<{ status: string; active_session
 }
 
 export async function downloadReconciliationExport(sessionId: string, format: 'csv' | 'xlsx'): Promise<void> {
-  const res = await fetch(`/api/session/${sessionId}/export?format=${format}`);
+  return downloadExport(sessionId, 'reconciliation', format);
+}
+
+export async function downloadExceptionExport(sessionId: string, format: 'csv' | 'xlsx'): Promise<void> {
+  return downloadExport(sessionId, 'exceptions', format);
+}
+
+async function downloadExport(sessionId: string, report: 'reconciliation' | 'exceptions', format: 'csv' | 'xlsx'): Promise<void> {
+  const path = report === 'exceptions' ? 'exceptions/export' : 'export';
+  const res = await fetch(`/api/session/${sessionId}/${path}?format=${format}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     if (res.status === 404) {
@@ -75,7 +84,7 @@ export async function downloadReconciliationExport(sessionId: string, format: 'c
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `reconciliation.${format}`;
+  link.download = `${report}.${format}`;
   document.body.appendChild(link);
   link.click();
   link.remove();

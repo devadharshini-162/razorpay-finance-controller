@@ -3,10 +3,11 @@ import sys
 import os
 import csv
 import io
+import json
 import zipfile
 from datetime import datetime
 from xml.sax.saxutils import escape
-from typing import Optional
+from typing import Any, Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -46,25 +47,80 @@ class QAResponse(BaseModel):
     evidence: dict
 
 
-def _export_rows(result):
-    """Return a spreadsheet-friendly, non-nested reconciliation ledger."""
-    return [
-        {
+RECONCILIATION_EXPORT_HEADERS = [
+    "Decision ID", "Source Record ID", "Bank Record ID", "Status", "Match Method",
+    "Confidence", "Source Amount", "Bank Amount", "Amount Difference",
+    "Source Transaction Date", "Bank Posted Date", "Source Reference", "Reason",
+]
+EXCEPTION_EXPORT_HEADERS = [
+    "Exception ID", "Record ID", "Exception Category", "Severity", "Status", "Reason",
+    "Confidence", "Evidence", "Suggested Action",
+]
+
+EXCEPTION_ACTIONS = {
+    "missing_record": "Verify whether the corresponding record exists in the other source.",
+    "amount_difference": "Review the monetary difference and verify fees, taxes, adjustments, or timing.",
+    "date_mismatch": "Review transaction and posting dates.",
+    "duplicate": "Review duplicate records and confirm the valid transaction.",
+    "ambiguous_match": "Review the candidate records and confirm the correct match.",
+    "batch_settlement": "Review the related transactions contributing to the settlement.",
+    "refund_mismatch": "Verify the refund transaction and corresponding settlement.",
+    "unknown": "Review the exception evidence manually.",
+}
+
+
+def _flatten_evidence(evidence: dict[str, Any]) -> str:
+    """Represent nested evidence safely in one spreadsheet cell."""
+    return json.dumps(evidence, default=str, sort_keys=True, separators=(",", ":"))
+
+
+def _export_rows(session: dict) -> list[dict[str, Any]]:
+    """Return flat reconciliation rows from stored pipeline output only."""
+    result = session["result"]
+    sources = {record.record_id: record for record in session.get("source_records", [])}
+    banks = {record.record_id: record for record in session.get("target_records", [])}
+    status_labels = {"matched": "Matched", "ambiguous": "Ambiguous", "unmatched": "Unmatched"}
+    rows = []
+    for decision in result.decisions:
+        source = sources.get(decision.source_record_id)
+        bank = banks.get(decision.candidate_record_id) if decision.decision == "matched" else None
+        source_amount = source.amount if source else None
+        bank_amount = bank.amount if bank else None
+        rows.append({
             "Decision ID": decision.decision_id,
             "Source Record ID": decision.source_record_id,
-            "Bank Record ID": decision.candidate_record_id or "",
-            "Decision": decision.decision,
+            "Bank Record ID": decision.candidate_record_id if bank else "",
+            "Status": status_labels[decision.decision],
             "Match Method": decision.method,
             "Confidence": decision.confidence,
-            "Reason": decision.reason,
-        }
-        for decision in result.decisions
-    ]
+            "Source Amount": source_amount if source_amount is not None else "",
+            "Bank Amount": bank_amount if bank_amount is not None else "",
+            "Amount Difference": source_amount - bank_amount if source_amount is not None and bank_amount is not None else "",
+            "Source Transaction Date": source.transaction_date if source and source.transaction_date else "",
+            "Bank Posted Date": bank.posted_date if bank and bank.posted_date else "",
+            "Source Reference": source.reference if source and source.reference else "",
+            "Reason": decision.reason or "",
+        })
+    return rows
 
 
-def _xlsx_bytes(rows: list[dict]) -> bytes:
+def _exception_export_rows(session: dict) -> list[dict[str, Any]]:
+    """Return flat exception rows without changing exception state."""
+    return [{
+        "Exception ID": exception.exception_id,
+        "Record ID": exception.record_id,
+        "Exception Category": exception.category,
+        "Severity": exception.severity,
+        "Status": "Open",
+        "Reason": exception.reason,
+        "Confidence": exception.confidence,
+        "Evidence": _flatten_evidence(exception.evidence),
+        "Suggested Action": EXCEPTION_ACTIONS[exception.category],
+    } for exception in session["result"].exceptions]
+
+
+def _xlsx_bytes(rows: list[dict], headers: list[str]) -> bytes:
     """Create a small standards-compliant XLSX workbook without a new dependency."""
-    headers = list(rows[0].keys()) if rows else ["Decision ID"]
     sheet_rows = [headers] + [[row.get(header, "") for header in headers] for row in rows]
     def cell(value, index, row_index):
         ref = f"{chr(65 + index)}{row_index}"
@@ -217,21 +273,45 @@ def export_reconciliation(session_id: str, format: str = "csv"):
         raise HTTPException(status_code=404, detail="Session not found.")
     if format not in {"csv", "xlsx"}:
         raise HTTPException(status_code=400, detail="format must be csv or xlsx")
-    rows = _export_rows(sessions[session_id]["result"])
+    rows = _export_rows(sessions[session_id])
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     if format == "csv":
         output = io.StringIO()
-        writer = csv.DictWriter(output, fieldnames=list(rows[0].keys()) if rows else ["Decision ID"])
+        writer = csv.DictWriter(output, fieldnames=RECONCILIATION_EXPORT_HEADERS)
         writer.writeheader()
         writer.writerows(rows)
         return Response(
             content=output.getvalue().encode("utf-8-sig"), media_type="text/csv",
-            headers={"Content-Disposition": f'attachment; filename="reconciliation-{timestamp}.csv"'},
+            headers={"Content-Disposition": f'attachment; filename="reconciliation-results-{timestamp}.csv"'},
         )
     return Response(
-        content=_xlsx_bytes(rows),
+        content=_xlsx_bytes(rows, RECONCILIATION_EXPORT_HEADERS),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="reconciliation-{timestamp}.xlsx"'},
+        headers={"Content-Disposition": f'attachment; filename="reconciliation-results-{timestamp}.xlsx"'},
+    )
+
+
+@app.get("/api/session/{session_id}/exceptions/export")
+def export_exceptions(session_id: str, format: str = "csv"):
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    if format not in {"csv", "xlsx"}:
+        raise HTTPException(status_code=400, detail="format must be csv or xlsx")
+    rows = _exception_export_rows(sessions[session_id])
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    if format == "csv":
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=EXCEPTION_EXPORT_HEADERS)
+        writer.writeheader()
+        writer.writerows(rows)
+        return Response(
+            content=output.getvalue().encode("utf-8-sig"), media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="exceptions-{timestamp}.csv"'},
+        )
+    return Response(
+        content=_xlsx_bytes(rows, EXCEPTION_EXPORT_HEADERS),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="exceptions-{timestamp}.xlsx"'},
     )
 
 

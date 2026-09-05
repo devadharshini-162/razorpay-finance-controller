@@ -9,6 +9,8 @@ import {
   ArrowUpRight,
   Copy,
   Check,
+  Download,
+  ChevronDown,
 } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { MetricCard } from '../components/MetricCard';
@@ -17,10 +19,13 @@ import type { ReconciliationReport } from '../types';
 interface OverviewPageProps {
   report: ReconciliationReport;
   onNavigateTab: (tab: string) => void;
+  onExport: (report: 'reconciliation' | 'exceptions', format: 'csv' | 'xlsx') => void;
+  exporting: string | null;
 }
 
-export const OverviewPage: React.FC<OverviewPageProps> = ({ report, onNavigateTab }) => {
+export const OverviewPage: React.FC<OverviewPageProps> = ({ report, onNavigateTab, onExport, exporting }) => {
   const [copied, setCopied] = React.useState(false);
+  const [exportsOpen, setExportsOpen] = React.useState(false);
 
   // Prepare data for Recharts matching method breakdown
   const chartData = Object.entries(report.deterministic_method_breakdown || {}).map(([method, count]) => ({
@@ -70,6 +75,47 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ report, onNavigateTa
           </button>
         </div>
       </div>
+
+      <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xs">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">Export Reports</h3>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Matched records are included in reconciliation results. Ambiguous and unmatched records remain open in the exception report.
+            </p>
+          </div>
+          <div className="relative self-start sm:self-auto">
+            <button
+              type="button"
+              onClick={() => setExportsOpen((open) => !open)}
+              disabled={exporting !== null}
+              aria-expanded={exportsOpen}
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:border-blue-500 hover:text-blue-600 disabled:opacity-50"
+            >
+              <Download className="h-3.5 w-3.5" />
+              {exporting ? 'Preparing report…' : 'Download reports'}
+              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${exportsOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {exportsOpen && (
+              <div className="absolute right-0 z-10 mt-2 w-52 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1 shadow-lg">
+                {(['reconciliation', 'exceptions'] as const).flatMap((reportType) =>
+                  (['csv', 'xlsx'] as const).map((format) => {
+                    const key = `${reportType}-${format}`;
+                    const label = reportType === 'reconciliation' ? 'Reconciliation' : 'Exceptions';
+                    return (
+                      <button key={key} onClick={() => { setExportsOpen(false); onExport(reportType, format); }}
+                        className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800">
+                        <span>{label}</span>
+                        <span className="font-semibold text-slate-400">{format.toUpperCase()}</span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
 
       {/* KPI Cards Grid: 5 key numbers */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
