@@ -130,7 +130,7 @@ The Merchant Payout Export uses a completely different column schema (`Payout No
 ## Screenshots
 
 ### Executive Overview
-![Overview](./docs/screenshots/overview.png)
+![Overview](./docs/screenshots/over_view.png)
 
 ### Decisions Explorer (Evidence Drawer open)
 ![Decisions](./docs/screenshots/decisions.png)
